@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 base="${1:-"."}"
 
 shopt -s globstar
@@ -8,7 +10,7 @@ failed=false
 
 for chart_file in "$base"/**/Chart.yaml
 do
-    dependencies="$(yq eval -o json < "$chart_file" | jq '(.dependencies // []) | map({ index: (.repository | sub("/+$"; "") + "/index.yaml"), name: .name, version: .version })')"
+    dependencies="$(yq -o json '.dependencies | map(.version_pattern = (.version | line_comment))' < "$chart_file" | jq 'map({ index: (.repository | sub("/+$"; "") + "/index.yaml"), name: .name, version: .version, version_pattern: (if .version_pattern == "" then null else .version_pattern end) })')"
     count="$(jq length <<< "$dependencies")"
     if [ "$count" -gt 0 ]
     then
@@ -22,10 +24,11 @@ do
             index="$(jq -r .index <<< "$dependency")"
             name="$(jq -r .name <<< "$dependency")"
             version="$(jq -r .version <<< "$dependency")"
+            version_pattern="$(jq .version_pattern <<< "$dependency")"
 
             echo "  Dependency '$name' in version '$version' from '$index':"
 
-            available_versions="$(curl -sL "$index" | yq eval -o json | jq --arg name "$name" '(.entries[$name] // []) | map(.version)')"
+            available_versions="$(curl -sL "$index" | yq eval -o json | jq --arg name "$name" --argjson version_pattern "$version_pattern" '(.entries[$name] // []) | map(.version) | map(select(test($version_pattern // "^.*$")))')"
             latest_version="$(jq -r first <<< "$available_versions")"
             version_index="$(jq -r --arg version "$version" '. | index($version)' <<< "$available_versions")"
             if [ "$version_index" = "null" ]

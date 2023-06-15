@@ -11,3 +11,13 @@ Usage
 
 The script takes one optional parameter: the path where to look for `Chart.yaml` files.
 
+Some charts publish pre-release version into the same repository as their release versions.
+To prevent these pre-release version from being considered, a regex can be specified as a line-comment, that matches only the
+relevant versions, for example like this:
+
+```yaml
+dependencies:
+  - name: k8ssandra-operator
+    repository: https://helm.k8ssandra.io/stable
+    version: 1.7.0 # ^\d+\.\d+\.\d+$
+```
