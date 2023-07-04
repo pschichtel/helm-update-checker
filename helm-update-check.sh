@@ -10,7 +10,7 @@ failed=false
 
 for chart_file in "$base"/**/Chart.yaml
 do
-    dependencies="$(yq -o json '.dependencies | map(.version_pattern = (.version | line_comment))' < "$chart_file" | jq 'map({ index: (.repository | sub("/+$"; "") + "/index.yaml"), name: .name, version: .version, version_pattern: (if .version_pattern == "" then null else .version_pattern end) })')"
+    dependencies="$(yq -o json '.dependencies | map(.version_pattern = (.version | line_comment))' < "$chart_file" | jq 'map({ repo: (.repository | sub("/+$"; "")), name: .name, version: .version, version_pattern: (if .version_pattern == "" then null else .version_pattern end) })')"
     count="$(jq length <<< "$dependencies")"
     if [ "$count" -gt 0 ]
     then
@@ -21,16 +21,24 @@ do
         while [ "$i" -lt "$count" ]
         do
             dependency="$(jq --argjson i "$i" '.[$i]' <<< "$dependencies")"
-            index="$(jq -r .index <<< "$dependency")"
+            repo="$(jq -r .repo <<< "$dependency")"
             name="$(jq -r .name <<< "$dependency")"
             version="$(jq -r .version <<< "$dependency")"
             version_pattern="$(jq .version_pattern <<< "$dependency")"
 
-            echo "  Dependency '$name' in version '$version' from '$index':"
+            echo "  Dependency '$name' in version '$version' from '$repo':"
 
+            if grep -qP '^oci://' <<< "$repo"
+            then
+                echo "    OCI registries are not currently supported!" >&2
+                continue
+            fi
+
+            index="$repo/index.yaml"
             available_versions="$(curl -sL "$index" | yq eval -o json | jq --arg name "$name" --argjson version_pattern "$version_pattern" '(.entries[$name] // []) | map(.version) | map(select(test($version_pattern // "^.*$")))')"
             latest_version="$(jq -r first <<< "$available_versions")"
             version_index="$(jq -r --arg version "$version" '. | index($version)' <<< "$available_versions")"
+
             if [ "$version_index" = "null" ]
             then
                 echo "    unknown version '$version', some available versions: $(jq -r '.[0:5] | join(", ")' <<< "$available_versions")" >&2
