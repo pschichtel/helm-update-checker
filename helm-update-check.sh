@@ -16,9 +16,7 @@ do
     then
         echo "Helm Chart: $chart_file"
 
-        declare -i i
-        i=0
-        while [ "$i" -lt "$count" ]
+        for i in $(seq 0 "$(("$count" - 1))")
         do
             dependency="$(jq --argjson i "$i" '.[$i]' <<< "$dependencies")"
             repo="$(jq -r .repo <<< "$dependency")"
@@ -36,7 +34,6 @@ do
 
             index="$repo/index.yaml"
             available_versions="$(curl -sL "$index" | yq eval -o json | jq --arg name "$name" --argjson version_pattern "$version_pattern" '(.entries[$name] // []) | map(.version) | map(select(test($version_pattern // "^.*$")))')"
-            latest_version="$(jq -r first <<< "$available_versions")"
             version_index="$(jq -r --arg version "$version" '. | index($version)' <<< "$available_versions")"
 
             if [ "$version_index" = "null" ]
@@ -50,7 +47,6 @@ do
             else
                 echo "    version '$version' is up to date!"
             fi
-            i+=1
         done
     fi
 done
