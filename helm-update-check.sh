@@ -8,6 +8,13 @@ shopt -s globstar
 
 failed=false
 
+max_versions="${MAX_VERSIONS:-5}"
+helm_repo_file="${HELM_REPO_FILE:-"$(mktemp)"}"
+helm_repo_cache="${HELM_REPO_CACHE:-"$(mktemp -d)"}"
+mkdir -p "$helm_repo_cache"
+
+helm_command=(helm --repository-cache "$helm_repo_cache" --repository-config "$helm_repo_file")
+
 for chart_file in "$base"/**/Chart.yaml
 do
     dependencies="$(yq -o json '.dependencies | map(.version_pattern = (.version | line_comment))' < "$chart_file" | jq 'map({ repo: (.repository | sub("/+$"; "")), name: .name, version: .version, version_pattern: (if .version_pattern == "" then null else .version_pattern end) })')"
@@ -32,20 +39,36 @@ do
                 continue
             fi
 
-            index="$repo/index.yaml"
-            available_versions="$(curl -sL "$index" | yq eval -o json | jq --arg name "$name" --argjson version_pattern "$version_pattern" '(.entries[$name] // []) | map(.version) | map(select(test($version_pattern // "^.*$")))')"
-            version_index="$(jq -r --arg version "$version" '. | index($version)' <<< "$available_versions")"
-
-            if [ "$version_index" = "null" ]
+            repo_name="$(echo -n "$repo" | md5sum | cut -d' ' -f1)"
+            if ! "${helm_command[@]}" repo add "$repo_name" "$repo" > /dev/null
             then
-                echo "    unknown version '$version', some available versions: $(jq -r '.[0:5] | join(", ")' <<< "$available_versions")" >&2
+                echo "    failed to add repository!"
                 failed=true
-            elif [ "$version_index" -gt 0 ]
+                continue
+            fi
+
+            all_versions="$("${helm_command[@]}" search repo "$repo_name/$name" --versions -o json)"
+            matching_versions="$("${helm_command[@]}" search repo "$repo_name/$name" --version "$version" --versions -o json)"
+
+            versions_query='map(.version) | map(select(test($version_pattern // "^.*$")))'
+            applicable_versions="$(jq --argjson version_pattern "$version_pattern" "$versions_query" <<< "$all_versions")"
+            assumed_version="$(jq -r --argjson version_pattern "$version_pattern" "$versions_query | first" <<< "$matching_versions")"
+
+            if [ "$assumed_version" = "null" ]
             then
-                echo "    version '$version' is superceded by these versions: $(jq -r --argjson index "$version_index" '.[0:$index] | join(", ")' <<< "$available_versions")" >&2
+                echo "    unknown version '$version', some available versions: $(jq -r --argjson max_versions "$max_versions" '.[0:([$max_versions, length] | min)] | join(", ")' <<< "$applicable_versions")" >&2
+                failed=true
+                continue
+            fi
+
+            version_index="$(jq -r --arg version "$assumed_version" '. | index($version)' <<< "$applicable_versions")"
+
+            if [ "$version_index" -gt 0 ]
+            then
+                echo "    version '$version' ('$assumed_version' specifically) is superceded by these versions: $(jq -r --argjson index "$version_index" --argjson max_versions "$max_versions" '.[0:([$max_versions, $index] | min)] | join(", ")' <<< "$applicable_versions")" >&2
                 failed=true
             else
-                echo "    version '$version' is up to date!"
+                echo "    version '$assumed_version' is up to date!"
             fi
         done
     fi
