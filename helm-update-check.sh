@@ -6,14 +6,14 @@ base="${1:-"."}"
 
 shopt -s globstar
 
-failed=false
-
 max_versions="${MAX_VERSIONS:-5}"
 helm_repo_file="${HELM_REPO_FILE:-"$(mktemp)"}"
 helm_repo_cache="${HELM_REPO_CACHE:-"$(mktemp -d)"}"
 mkdir -p "$helm_repo_cache"
 
 helm_command=(helm --repository-cache "$helm_repo_cache" --repository-config "$helm_repo_file")
+
+problems=()
 
 for chart_file in "$base"/**/Chart.yaml
 do
@@ -43,7 +43,7 @@ do
             if ! "${helm_command[@]}" repo add "$repo_name" "$repo" > /dev/null
             then
                 echo "    failed to add repository!"
-                failed=true
+                problems+=("$name:$version from $repo: Failed to add repo")
                 continue
             fi
 
@@ -57,7 +57,7 @@ do
             if [ "$assumed_version" = "null" ]
             then
                 echo "    unknown version '$version', some available versions: $(jq -r --argjson max_versions "$max_versions" '.[0:([$max_versions, length] | min)] | join(", ")' <<< "$applicable_versions")" >&2
-                failed=true
+                problems+=("$name:$version from $repo: Unknown version, latest valid would be: $(jq -r '.[0]' <<< "$applicable_versions")")
                 continue
             fi
 
@@ -66,7 +66,7 @@ do
             if [ "$version_index" -gt 0 ]
             then
                 echo "    version '$version' ('$assumed_version' specifically) is superceded by these versions: $(jq -r --argjson index "$version_index" --argjson max_versions "$max_versions" '.[0:([$max_versions, $index] | min)] | join(", ")' <<< "$applicable_versions")" >&2
-                failed=true
+                problems+=("$name:$version from $repo: Superceded, latest is: $(jq -r '.[0]' <<< "$applicable_versions")")
             else
                 echo "    version '$assumed_version' is up to date!"
             fi
@@ -74,9 +74,14 @@ do
     fi
 done
 
-if [ "$failed" = "true" ]
+if [ "${#problems[@]}" -gt 0 ]
 then
-    echo "Some dependencies were not up to date!"
+    echo ""
+    echo "Problems:"
+    for problem in "${problems[@]}"
+    do
+        echo " * $problem"
+    done
     exit 1
 fi
 
