@@ -31,7 +31,7 @@ do
             version="$(jq -r .version <<< "$dependency")"
             version_pattern="$(jq .version_pattern <<< "$dependency")"
 
-            echo "  Dependency '$name' in version '$version' from '$repo':"
+            echo "  Dependency '$name' in version '$version' from $repo:"
 
             if grep -qP '^oci://' <<< "$repo"
             then
