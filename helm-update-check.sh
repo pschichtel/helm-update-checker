@@ -37,6 +37,9 @@ do
             then
                 echo "    OCI registries are not currently supported!" >&2
                 continue
+            elif grep -qP '^file://' <<< "$repo"
+            then
+                continue
             fi
 
             repo_name="$(echo -n "$repo" | md5sum | cut -d' ' -f1)"
