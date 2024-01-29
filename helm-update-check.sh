@@ -40,6 +40,10 @@ do
             elif grep -qP '^file://' <<< "$repo"
             then
                 continue
+            elif ! grep -qP '^https?://' <<< "$repo"
+            then
+                echo "    Unsupported repository format!" >&2
+                continue
             fi
 
             repo_name="$(echo -n "$repo" | md5sum | cut -d' ' -f1)"
